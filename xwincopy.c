@@ -153,13 +153,13 @@ void copy_sync()
 	XEvent event;
 	while(1) {
 
+		XNextEvent(g_display, &event);
+
 		XWindowAttributes attr_src;
 		XGetWindowAttributes(g_display, wnd_src, &attr_src);
 
 		XWindowAttributes attr_obj;
 		XGetWindowAttributes(g_display, g_wnd_obj, &attr_obj);
-
-		XNextEvent(g_display, &event);
 
 		switch(event.type) {
 			case Expose :
