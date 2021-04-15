@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
+#include <sys/time.h>
 
 #include "xwincopy.h"
 
@@ -19,6 +21,7 @@ Bool g_listonly;
 pid_t g_pid;
 
 Display * g_display;
+Window g_wnd_obj;
 static Visual * g_visual;
 static GC g_gc;
 
@@ -125,55 +128,71 @@ void copy_sync()
 	g_visual = DefaultVisual(g_display, DefaultScreen(g_display));
 
 	XSetWindowAttributes attr_obj;
-	Window wnd_obj = XCreateWindow(g_display, DefaultRootWindow(g_display),
+	g_wnd_obj = XCreateWindow(g_display, DefaultRootWindow(g_display),
 			0, 0, attr_src.width, attr_src.height, 
 			attr_src.border_width, attr_src.depth, InputOutput,
 			g_visual, CWBackPixel, &attr_obj);
 
-	g_gc = XCreateGC(g_display, wnd_obj, 0, NULL);
+	g_gc = XCreateGC(g_display, g_wnd_obj, 0, NULL);
 
 	int pid = getpid();
 	Atom atom = XInternAtom(g_display, "_NET_WM_PID", False);
-	XChangeProperty(g_display, wnd_obj, atom,
+	XChangeProperty(g_display, g_wnd_obj, atom,
 			XA_CARDINAL, sizeof(pid_t) * 8, 
 			PropModeReplace, (unsigned char *)&pid, 1);
 
-	XSelectInput(g_display, wnd_obj, KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | VisibilityChangeMask | FocusChangeMask | StructureNotifyMask | ExposureMask | PropertyChangeMask);
+	XSelectInput(g_display, g_wnd_obj, KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | VisibilityChangeMask | FocusChangeMask | StructureNotifyMask | ExposureMask | PropertyChangeMask);
 
-	XStoreName(g_display, wnd_obj, "xwincopy");
+	XStoreName(g_display, g_wnd_obj, "xwincopy");
 
-	XMapWindow(g_display, wnd_obj);
+	XMapWindow(g_display, g_wnd_obj);
 
-
+	set_event_timer();
+	
+	Time lbtime = 0;
 	XEvent event;
 	while(1) {
+
+		XWindowAttributes attr_src;
+		XGetWindowAttributes(g_display, wnd_src, &attr_src);
+
+		XWindowAttributes attr_obj;
+		XGetWindowAttributes(g_display, g_wnd_obj, &attr_obj);
+
 		XNextEvent(g_display, &event);
 
-		switch(event.type){
-			case Expose:
+		switch(event.type) {
+			case Expose :
 				{
-					if (event.xexpose.window == wnd_obj) {
-					}
-
-					break;
-				}
-			default:
-				{
-					XWindowAttributes attr_src;
-					XGetWindowAttributes(g_display, wnd_src, &attr_src);
-
-					XWindowAttributes attr_obj;
-					XGetWindowAttributes(g_display, wnd_obj, &attr_obj);
-
 					if (attr_src.width != attr_obj.width 
 							|| attr_src.height != attr_obj.height) {
-						zoom_wnd(wnd_src, attr_src, wnd_obj, attr_obj);
-						sleep(1);
+						logger("zoom window\n");
+						zoom_wnd(wnd_src, attr_src, g_wnd_obj, attr_obj);
 					} else {
-						XCopyArea(g_display, wnd_src, wnd_obj, g_gc, 0, 0,  attr_src.width, attr_src.height, 0, 0);
-						usleep(100000);
+						logger("copy window\n");
+						XCopyArea(g_display, wnd_src, g_wnd_obj, g_gc, 0, 0,  attr_src.width, attr_src.height, 0, 0);
 					}
+				
+					break;
+				}
+			case ButtonPress:
+				{
+					if (event.xbutton.button == Button1) {
+						if (lbtime > 0 
+								&& event.xbutton.time - lbtime < 500) {
+							/* double click */
+							lbtime = 0;
 
+							g_width_src = g_width_obj = attr_src.width;
+							g_height_src = g_height_obj = attr_src.height;
+							g_zoomsize = 1;
+
+							XResizeWindow(g_display, g_wnd_obj, attr_src.width, attr_src.height); 
+							XCopyArea(g_display, wnd_src, g_wnd_obj, g_gc, 0, 0,  attr_src.width, attr_src.height, 0, 0);
+						} else {
+							lbtime = event.xbutton.time;
+						}
+					}
 
 					break;
 				}
@@ -182,8 +201,33 @@ void copy_sync()
 
 	XFreeGC(g_display, g_gc);
 
+	XDestroyWindow(g_display, g_wnd_obj);
+
 	logger("done.\n");
 }
+
+void signal_act(int sig)
+{
+	if (sig == SIGALRM) {
+		XEvent xevent;
+		xevent.type = Expose;
+		XSendEvent(g_display, g_wnd_obj, False, ExposureMask, &xevent);
+		XFlush(g_display);
+	}
+}
+
+void set_event_timer()
+{
+	signal(SIGALRM, signal_act);
+
+	struct itimerval val;
+	val.it_value.tv_sec = 0;
+	val.it_value.tv_usec = 500000;
+	val.it_interval = val.it_value;
+
+	setitimer(ITIMER_REAL, &val, NULL);	// 定时发送 SIGALRM
+}
+
 
 void zoom_wnd(Window wnd_src, XWindowAttributes attr_src, Window wnd_obj, XWindowAttributes attr_obj)
 {
@@ -209,9 +253,10 @@ void zoom_wnd(Window wnd_src, XWindowAttributes attr_src, Window wnd_obj, XWindo
 	XImage * imagesrc;
 	imagesrc = XGetImage(g_display, wnd_src, 0, 0, attr_src.width, attr_src.height, AllPlanes, ZPixmap);
 
-	char * buf = malloc(width * height * imagesrc->bits_per_pixel / 8);
+	int lenpixel = imagesrc->bits_per_pixel / 8;
+	char * buf = malloc(width * height * lenpixel);
 
-	zoom_data(imagesrc->data, imagesrc->width, buf, width, height, imagesrc->bits_per_pixel / 8, zoomsize);
+	zoom_data(imagesrc->data, imagesrc->width, buf, width, height, lenpixel, zoomsize);
 	 
 	char dummy;
 	XImage * imageobj = XCreateImage( g_display, g_visual, imagesrc->depth, ZPixmap, 0, &dummy, width, height, imagesrc->bitmap_pad, 0 );
