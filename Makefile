@@ -13,7 +13,7 @@ target = xwincopy
 
 all: $(target)
 
-$(target) : $(objs)
+$(target): $(objs)
 	$(cc) $(cflags) -o $@ $^ -lX11
 
 clean:

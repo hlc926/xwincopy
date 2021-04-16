@@ -15,7 +15,7 @@ void list_wnds();
 void copy_sync();
 
 Window select_wnd();
-void set_event_timer();
+void set_event_timer(char ctype);
 
 void zoom_wnd(Window wnd_src, XWindowAttributes attr_src, Window wnd_obj, XWindowAttributes attr_obj);
 void zoom_data(const char * data, int datawidth, char * buf, int width, int height, int lenpixel, float zoomsize);

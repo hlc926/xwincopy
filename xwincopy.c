@@ -13,7 +13,7 @@ static void usage(char *program)
 	fprintf(stderr, "xwincopy: Copy xlib's window and synchronize in real time.\n");
 	fprintf(stderr, "Usage: %s [options] pid\n", program);
     fprintf(stderr, "   -l: only list windows for pid.\n");
-    fprintf(stderr, "   -n <num>: copy the number(n) window for pid, automatically selected by default.\n");
+    fprintf(stderr, "   -n <num>: copy the window(num, from -l) for pid, automatically selected by default.\n");
 }
 
 int g_copynum;
@@ -30,6 +30,8 @@ int g_width_obj, g_height_obj;
 float g_zoomsize;
 
 Atom g_atompid;
+
+Bool g_exit = False;
 
 Window g_list_wnd[MAX_LIST_WND];
 int g_list_cnt;
@@ -90,7 +92,7 @@ void getparam(int argc, char* argv[])
 
 int operate()
 {
-	g_atompid = XInternAtom(g_display, "_NET_WM_PID", False);
+	g_atompid = XInternAtom(g_display, "_NET_WM_PID", True);
 	if(g_atompid == None) {
 		logger("XInternAtom No such atom\n");
 		return -1;
@@ -111,6 +113,7 @@ int operate()
 
 	return 0;
 }
+
 
 void copy_sync()
 {
@@ -135,22 +138,28 @@ void copy_sync()
 
 	g_gc = XCreateGC(g_display, g_wnd_obj, 0, NULL);
 
+	XStoreName(g_display, g_wnd_obj, "xwincopy");
+
 	int pid = getpid();
-	Atom atom = XInternAtom(g_display, "_NET_WM_PID", False);
+	Atom atom = XInternAtom(g_display, "_NET_WM_PID", True);
 	XChangeProperty(g_display, g_wnd_obj, atom,
 			XA_CARDINAL, sizeof(pid_t) * 8, 
 			PropModeReplace, (unsigned char *)&pid, 1);
 
-	XSelectInput(g_display, g_wnd_obj, KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | VisibilityChangeMask | FocusChangeMask | StructureNotifyMask | ExposureMask | PropertyChangeMask);
+	Atom kill_atom = XInternAtom(g_display, "WM_DELETE_WINDOW", True);
+	XSetWMProtocols(g_display, g_wnd_obj, &kill_atom, 1);
 
-	XStoreName(g_display, g_wnd_obj, "xwincopy");
+	XSelectInput(g_display, g_wnd_obj, 
+			ExposureMask | ButtonPressMask | PointerMotionMask);
 
 	XMapWindow(g_display, g_wnd_obj);
 
-	set_event_timer();
+	set_event_timer('I');
 	
 	Time lbtime = 0;
+	int x_offset = 0, y_offset = 0;
 	XEvent event;
+
 	while(1) {
 
 		XNextEvent(g_display, &event);
@@ -166,16 +175,17 @@ void copy_sync()
 				{
 					if (attr_src.width != attr_obj.width 
 							|| attr_src.height != attr_obj.height) {
-						logger("zoom window\n");
+						set_event_timer('Z');
 						zoom_wnd(wnd_src, attr_src, g_wnd_obj, attr_obj);
 					} else {
-						logger("copy window\n");
-						XCopyArea(g_display, wnd_src, g_wnd_obj, g_gc, 0, 0,  attr_src.width, attr_src.height, 0, 0);
+						set_event_timer('C');
+						XCopyArea(g_display, wnd_src, g_wnd_obj, g_gc, 
+								0, 0,  attr_src.width, attr_src.height, 0, 0);
 					}
-				
+
 					break;
 				}
-			case ButtonPress:
+			case ButtonPress :
 				{
 					if (event.xbutton.button == Button1) {
 						if (lbtime > 0 
@@ -187,15 +197,43 @@ void copy_sync()
 							g_height_src = g_height_obj = attr_src.height;
 							g_zoomsize = 1;
 
-							XResizeWindow(g_display, g_wnd_obj, attr_src.width, attr_src.height); 
-							XCopyArea(g_display, wnd_src, g_wnd_obj, g_gc, 0, 0,  attr_src.width, attr_src.height, 0, 0);
-						} else {
+							XResizeWindow(g_display, g_wnd_obj, 
+									attr_src.width, attr_src.height); 
+							XCopyArea(g_display, wnd_src, g_wnd_obj, g_gc, 
+									0, 0,  attr_src.width, attr_src.height, 
+									0, 0);
+						} else { /* click */
 							lbtime = event.xbutton.time;
+
+							x_offset = event.xbutton.x;
+							y_offset = event.xbutton.y;
 						}
 					}
 
 					break;
 				}
+			case MotionNotify :
+				{
+					if (event.xmotion.state & Button1Mask) {
+						XMoveWindow(g_display, g_wnd_obj,
+								event.xmotion.x_root - x_offset,
+								event.xmotion.y_root - y_offset - 50);
+					}
+
+					break;
+				}
+			case ClientMessage :
+				{
+					if (event.xclient.data.l[0] == (long) kill_atom) {
+						g_exit = True;
+					}
+
+					break;
+				}
+		} // switch event
+
+		if (g_exit == True) {
+			break;
 		}
 	}
 
@@ -205,6 +243,7 @@ void copy_sync()
 
 	logger("done.\n");
 }
+
 
 void signal_act(int sig)
 {
@@ -216,13 +255,19 @@ void signal_act(int sig)
 	}
 }
 
-void set_event_timer()
+void set_event_timer(char ctype)
 {
-	signal(SIGALRM, signal_act);
+	if (ctype == 'I') {	// Init
+		signal(SIGALRM, signal_act);
+	}
 
 	struct itimerval val;
 	val.it_value.tv_sec = 0;
-	val.it_value.tv_usec = 500000;
+	if (ctype == 'Z') {	// Zoom
+		val.it_value.tv_usec = 500000;
+	} else {			// Copy or Init
+		val.it_value.tv_usec = 100000;
+	}
 	val.it_interval = val.it_value;
 
 	setitimer(ITIMER_REAL, &val, NULL);	// 定时发送 SIGALRM
@@ -237,11 +282,13 @@ void zoom_wnd(Window wnd_src, XWindowAttributes attr_src, Window wnd_obj, XWindo
 
 	if (g_width_src != attr_src.width || g_height_src != attr_src.height
 			|| width != attr_obj.width || height != attr_obj.height ) {
-		g_width_src = attr_src.width;
-		g_height_src = attr_src.height;
+
 		float zw = attr_obj.width / (float)attr_src.width;
 		float zh = attr_obj.height / (float)attr_src.height;
 		zoomsize = zw < zh ? zw : zh;
+
+		g_width_src = attr_src.width;
+		g_height_src = attr_src.height;
 		g_zoomsize = zoomsize = ((int)(zoomsize * 1000)) / (float)1000;
 		g_width_obj = width = (int)attr_src.width * zoomsize;
 		g_height_obj = height = (int)attr_src.height * zoomsize;
@@ -308,7 +355,7 @@ void list_wnds()
 		Window wnd = g_list_wnd[i];
 		XWindowAttributes attr;
 		XGetWindowAttributes(g_display, wnd, &attr);
-		logger("found: i[%d] width[%d] height[%d] map[%d]\n", i, attr.width, attr.height, attr.map_state);
+		logger("window: num[%d] width[%d] height[%d] map_state[%d]\n", i, attr.width, attr.height, attr.map_state);
 	}
 }
 

@@ -1,6 +1,6 @@
 
-#ifndef __XWINCOPY_DEFINED_H
-#define __XWINCOPY_DEFINED_H
+#ifndef __XWINCOPY_DEFINE_H
+#define __XWINCOPY_DEFINE_H
 
 #define logger printf
 
