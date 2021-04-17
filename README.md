@@ -4,7 +4,7 @@ Copy xlib's window and synchronize in real time
 ![image](doc/xwincopy.png)
 
 ### 功能:
-拷贝xlib的窗口并同步。  
+拷贝xlib的窗口并实时同步。  
 可以zoom放大缩小窗口。  
 双击拷贝窗口重置为源窗口大小。  
 拖放移动窗口。  
