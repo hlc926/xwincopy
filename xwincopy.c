@@ -11,14 +11,23 @@
 static void usage(char *program)
 {
 	fprintf(stderr, "xwincopy: Copy xlib's window and synchronize in real time.\n");
-	fprintf(stderr, "Usage: %s [options] pid\n", program);
-    fprintf(stderr, "   -l: only list windows for pid.\n");
-    fprintf(stderr, "   -n <num>: copy the window(num, from -l) for pid, automatically selected by default.\n");
+
+	fprintf(stderr, "Usage: %s [options]\n", program);
+	fprintf(stderr, " copy the window by mouse's click. By default.\n");
+    fprintf(stderr, "   -w <wid>: copy the window by window's id.\n");
+    fprintf(stderr, "   -p <pid>: copy the window by pid.\n");
+    fprintf(stderr, "   -l: only list window's id.\n");
+    fprintf(stderr, "   -t: show the window's tree.\n");
+    fprintf(stderr, "   -h: help.\n");
 }
 
-int g_copynum;
-Bool g_listonly;
 pid_t g_pid;
+Window g_wid;
+Bool g_showtree;
+Bool g_listonly;
+
+Bool g_isclick;
+int g_treedepth;
 
 Display * g_display;
 Window g_wnd_obj;
@@ -30,6 +39,7 @@ int g_width_obj, g_height_obj;
 float g_zoomsize;
 
 Atom g_atompid;
+Atom g_atomwmstate;
 
 Bool g_exit = False;
 
@@ -41,16 +51,12 @@ int main(int argc, char* argv[])
 
 	getparam(argc, argv);
 
-	if (argc - optind != 1) {
+	/*
+	if (argc - optind != 1) {	// not need
 		usage(argv[0]);
 		return -1;
 	}
-
-	g_pid = atoi(argv[optind]);
-	if (g_pid < 1) {
-		logger("pid[%d] < 1\n", g_pid);
-		return -1;
-	}
+	*/
 
 	g_display = XOpenDisplay(NULL);	// /usr/include/X11/Xlib.h
 	if (g_display == NULL) {
@@ -68,20 +74,31 @@ int main(int argc, char* argv[])
 
 void getparam(int argc, char* argv[])
 {
-	g_copynum = -1;
+	g_wid = 0;
+	g_pid = 0;
 	g_listonly = False;
+	g_showtree = False;
 
 	char c;
-	while ((c = getopt(argc, argv, "ln:")) != -1) {
+	while ((c = getopt(argc, argv, "htlw:p:")) != -1) {
 		switch (c)
 		{
+			case 't':
+				g_showtree = True;
+				break;
+
 			case 'l':
 				g_listonly = True;
 				break;
 
-			case 'n':
-				g_copynum = atoi(optarg);
+			case 'w':
+				sscanf(optarg, "%lx", &g_wid);
 				break;
+
+			case 'p':
+				g_pid = atoi(optarg);
+				break;
+
 
 			default:
 				usage(argv[0]);
@@ -93,15 +110,27 @@ void getparam(int argc, char* argv[])
 int operate()
 {
 	g_atompid = XInternAtom(g_display, "_NET_WM_PID", True);
-	if(g_atompid == None) {
-		logger("XInternAtom No such atom\n");
-		return -1;
+	g_atomwmstate = XInternAtom(g_display, "_NET_WM_STATE", True);
+
+	g_treedepth = 0;
+	g_list_cnt = 0;
+	g_isclick = False;
+
+	if (g_wid != 0) {
+		g_list_wnd[g_list_cnt++] = g_wid;
+	} else if (g_pid != 0) {
+		get_wnds(DefaultRootWindow(g_display));
+	} else {
+		logger("\n"
+				"xwincopy: Please select the window about \n"
+				"          which you would like to copy and sync \n"
+				"          by clicking the mouse in that window. \n");
+		g_isclick = True;
+		get_click();
 	}
 
-	g_list_cnt = 0;
-	search_pid(DefaultRootWindow(g_display));
 	if (g_list_cnt < 1) {
-		logger("pid[%d] do not have windows\n", g_pid);
+		logger("do not have windows\n");
 		return -1;
 	}
 
@@ -114,10 +143,31 @@ int operate()
 	return 0;
 }
 
+void get_click()
+{
+	XGrabPointer(g_display, DefaultRootWindow(g_display), False, ButtonPressMask, GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+
+	Window wnd;
+	XEvent event;
+
+	while(1) {
+
+		XNextEvent(g_display, &event);
+
+		if (event.type == ButtonPress) {
+			wnd = event.xbutton.subwindow;
+			break;
+		}
+	}
+
+	XUngrabPointer(g_display, CurrentTime);
+
+	get_wnds(wnd);
+}
 
 void copy_sync()
 {
-	Window wnd_src = select_wnd();
+	Window wnd_src = g_list_wnd[0];
 
 	XWindowAttributes attr_src;
 	XGetWindowAttributes(g_display, wnd_src, &attr_src);
@@ -126,7 +176,7 @@ void copy_sync()
 	g_height_src = g_height_obj = attr_src.height;
 	g_zoomsize = 1;
 
-	logger("select: width[%d] height[%d] map[%d]\n", attr_src.width, attr_src.height, attr_src.map_state);
+	logger("select: id[0x%lx] width[%d] height[%d]\n", wnd_src, attr_src.width, attr_src.height);
 
 	g_visual = DefaultVisual(g_display, DefaultScreen(g_display));
 
@@ -331,54 +381,63 @@ void zoom_data(const char * data, int datawidth, char * buf, int width, int heig
 	} 
 }
 
-Window select_wnd()
-{
-	if (g_copynum >= 0 && g_copynum < g_list_cnt) {
-		return g_list_wnd[g_copynum];
-	}
-
-	for (int i = 0; i < g_list_cnt; i++) {
-		Window wnd = g_list_wnd[i];
-		XWindowAttributes attr;
-		XGetWindowAttributes(g_display, wnd, &attr);
-		if (attr.map_state == IsViewable) {
-			return wnd;
-		}
-	}
-
-	return g_list_wnd[0];
-}
-
 void list_wnds()
 {
 	for (int i = 0; i < g_list_cnt; i++) {
 		Window wnd = g_list_wnd[i];
 		XWindowAttributes attr;
 		XGetWindowAttributes(g_display, wnd, &attr);
-		logger("window: num[%d] width[%d] height[%d] map_state[%d]\n", i, attr.width, attr.height, attr.map_state);
+		logger("window: id[0x%lx] width[%d] height[%d]\n", wnd, attr.width, attr.height);
 	}
 }
 
 /* 递归 */
-void search_pid(Window wnd)
+void get_wnds(Window wnd)
 {
-	// Get the PID for the current Window.
+	if (g_showtree == True) {
+		for(int i = 0; i < g_treedepth * 4; i++) {
+			logger(" ");
+		}
+		logger("[%d] id[%lx]\n", g_treedepth, wnd);
+	}
+
 	Atom           type;
 	int            format;
 	unsigned long  nitems;
 	unsigned long  bytesafter;
-	unsigned char *proppid = NULL;
+	unsigned char *rtnprop = NULL;
 
-	if(XGetWindowProperty(g_display, wnd, g_atompid, 0, 1, False, XA_CARDINAL, &type, &format, &nitems, &bytesafter, &proppid) == Success) {
-		if(proppid != NULL) {
-			if(g_pid == *((pid_t *)proppid)) {
-				if (g_list_cnt < MAX_LIST_WND) {
-					g_list_wnd[g_list_cnt++] = wnd;
-				} else {
-					logger("skip for cnt[%d] >= max[%d]\n", g_list_cnt, MAX_LIST_WND);
+	Bool check = False;
+
+	if (g_isclick == True) {
+		check = True;
+	} else if (g_pid != 0) {
+		if(XGetWindowProperty(g_display, wnd, g_atompid, 0, 1, False, XA_CARDINAL, &type, &format, &nitems, &bytesafter, &rtnprop) == Success) {
+			if(rtnprop != NULL) {
+				if(g_pid == *((pid_t *)rtnprop)) {
+					check = True;
+				}
+				XFree(rtnprop);
+			}
+		}
+	}
+
+	if (check == True) {
+		if (g_list_cnt < MAX_LIST_WND) {
+			XWindowAttributes attr;
+			XGetWindowAttributes(g_display, wnd, &attr);
+			if (attr.map_state == IsViewable) {
+				if(XGetWindowProperty(g_display, wnd, g_atomwmstate, 0, 1, False, XA_CARDINAL, &type, &format, &nitems, &bytesafter, &rtnprop) == Success) {
+					if(rtnprop != NULL) {
+						if (*((int*)rtnprop) != 0) {
+							g_list_wnd[g_list_cnt++] = wnd;
+						}
+						XFree(rtnprop);
+					}
 				}
 			}
-			XFree(proppid);
+		} else {
+			logger("skip for cnt[%d] >= max[%d]\n", g_list_cnt, MAX_LIST_WND);
 		}
 	}
 
@@ -389,7 +448,9 @@ void search_pid(Window wnd)
     XQueryTree(g_display, wnd, &root_return, &parent_return, &child_list, &child_num);
 
 	for(unsigned int i = 0; i < child_num; i++) {
-		search_pid(child_list[i]);
+		g_treedepth++;
+		get_wnds(child_list[i]);
+		g_treedepth--;
 	}
 
     XFree(child_list);
