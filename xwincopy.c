@@ -8,17 +8,36 @@
 
 #include "xwincopy.h"
 
+#define get_wnd_property(wnd, property, rtnval, rtntype) \
+	do { \
+		Atom           type; \
+		int            format;  \
+		unsigned long  nitems; \
+		unsigned long  bytesafter; \
+		unsigned char *rtnprop = NULL; \
+		\
+		if(XGetWindowProperty(g_display, wnd, property, 0, 1, False, XA_CARDINAL, &type, &format, &nitems, &bytesafter, &rtnprop) == Success) { \
+			if(rtnprop != NULL) { \
+				rtnval = *((rtntype*)rtnprop); \
+				XFree(rtnprop); \
+			} \
+		} \
+		\
+	} while (0)
+
+
+
 static void usage(char *program)
 {
 	fprintf(stderr, "xwincopy: Copy xlib's window and synchronize in real time.\n");
 
 	fprintf(stderr, "Usage: %s [options]\n", program);
-	fprintf(stderr, " copy the window by mouse's click. By default.\n");
-    fprintf(stderr, "   -w <wid>: copy the window by window's id.\n");
-    fprintf(stderr, "   -p <pid>: copy the window by pid.\n");
-    fprintf(stderr, "   -l: only list window's id.\n");
-    fprintf(stderr, "   -t: show the window's tree.\n");
-    fprintf(stderr, "   -h: help.\n");
+	fprintf(stderr, " copy the window by clicking the mouse in that window. By default.\n");
+	fprintf(stderr, "   -w <wid>: copy the window by window id.\n");
+	fprintf(stderr, "   -p <pid>: copy the window by process pid.\n");
+	fprintf(stderr, "   -l: only list window id.\n");
+	fprintf(stderr, "   -t: show the window tree.\n");
+	fprintf(stderr, "   -h: help.\n");
 }
 
 pid_t g_pid;
@@ -52,17 +71,17 @@ int main(int argc, char* argv[])
 	getparam(argc, argv);
 
 	/*
-	if (argc - optind != 1) {	// not need
-		usage(argv[0]);
-		return -1;
-	}
-	*/
+	   if (argc - optind != 1) {	// not need
+	   usage(argv[0]);
+	   return -1;
+	   }
+	   */
 
 	g_display = XOpenDisplay(NULL);	// /usr/include/X11/Xlib.h
 	if (g_display == NULL) {
-        logger( "failed to open X11 display: %s", XDisplayName(NULL));
-        return -1;
-    }
+		logger( "failed to open X11 display: %s", XDisplayName(NULL));
+		return -1;
+	}
 
 	operate();
 
@@ -124,7 +143,7 @@ int operate()
 		logger("\n"
 				"xwincopy: Please select the window about \n"
 				"          which you would like to copy and sync \n"
-				"          by clicking the mouse in that window. \n");
+				"          by clicking the mouse in that window. \n\n");
 		g_isclick = True;
 		get_click();
 	}
@@ -145,7 +164,9 @@ int operate()
 
 void get_click()
 {
-	XGrabPointer(g_display, DefaultRootWindow(g_display), False, ButtonPressMask, GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+	Cursor cursor = XCreateFontCursor(g_display, XC_watch);
+
+	XGrabPointer(g_display, DefaultRootWindow(g_display), False, ButtonPressMask, GrabModeAsync, GrabModeAsync, None, cursor, CurrentTime);
 
 	Window wnd;
 	XEvent event;
@@ -161,6 +182,7 @@ void get_click()
 	}
 
 	XUngrabPointer(g_display, CurrentTime);
+	XFreeCursor(g_display, cursor);
 
 	get_wnds(wnd);
 }
@@ -176,7 +198,10 @@ void copy_sync()
 	g_height_src = g_height_obj = attr_src.height;
 	g_zoomsize = 1;
 
-	logger("select: id[0x%lx] width[%d] height[%d]\n", wnd_src, attr_src.width, attr_src.height);
+	int vm_state = 0;
+	get_wnd_property(wnd_src, g_atompid, vm_state, int);
+
+	logger("select: id[0x%lx] width[%d] height[%d] map_state[%d] vm_state[%d]\n", wnd_src, attr_src.width, attr_src.height, attr_src.map_state, vm_state);
 
 	g_visual = DefaultVisual(g_display, DefaultScreen(g_display));
 
@@ -205,7 +230,7 @@ void copy_sync()
 	XMapWindow(g_display, g_wnd_obj);
 
 	set_event_timer('I');
-	
+
 	Time lbtime = 0;
 	int x_offset = 0, y_offset = 0;
 	XEvent event;
@@ -214,15 +239,15 @@ void copy_sync()
 
 		XNextEvent(g_display, &event);
 
-		XWindowAttributes attr_src;
-		XGetWindowAttributes(g_display, wnd_src, &attr_src);
-
-		XWindowAttributes attr_obj;
-		XGetWindowAttributes(g_display, g_wnd_obj, &attr_obj);
-
 		switch(event.type) {
 			case Expose :
 				{
+					XWindowAttributes attr_src;
+					XGetWindowAttributes(g_display, wnd_src, &attr_src);
+
+					XWindowAttributes attr_obj;	// 不要提前 moving可能挂死
+					XGetWindowAttributes(g_display, g_wnd_obj, &attr_obj);
+
 					if (attr_src.width != attr_obj.width 
 							|| attr_src.height != attr_obj.height) {
 						set_event_timer('Z');
@@ -242,6 +267,9 @@ void copy_sync()
 								&& event.xbutton.time - lbtime < 500) {
 							/* double click */
 							lbtime = 0;
+
+							XWindowAttributes attr_src;
+							XGetWindowAttributes(g_display, wnd_src, &attr_src);
 
 							g_width_src = g_width_obj = attr_src.width;
 							g_height_src = g_height_obj = attr_src.height;
@@ -354,7 +382,7 @@ void zoom_wnd(Window wnd_src, XWindowAttributes attr_src, Window wnd_obj, XWindo
 	char * buf = malloc(width * height * lenpixel);
 
 	zoom_data(imagesrc->data, imagesrc->width, buf, width, height, lenpixel, zoomsize);
-	 
+
 	char dummy;
 	XImage * imageobj = XCreateImage( g_display, g_visual, imagesrc->depth, ZPixmap, 0, &dummy, width, height, imagesrc->bitmap_pad, 0 );
 	imageobj->byte_order = imagesrc->byte_order;
@@ -387,65 +415,55 @@ void list_wnds()
 		Window wnd = g_list_wnd[i];
 		XWindowAttributes attr;
 		XGetWindowAttributes(g_display, wnd, &attr);
-		logger("window: id[0x%lx] width[%d] height[%d]\n", wnd, attr.width, attr.height);
+		int vm_state = 0;
+		get_wnd_property(wnd, g_atompid, vm_state, int);
+		logger("window: id[0x%lx] width[%d] height[%d] map_state[%d] vm_state[%d]\n", wnd, attr.width, attr.height, attr.map_state, vm_state);
 	}
 }
 
 /* 递归 */
 void get_wnds(Window wnd)
 {
-	if (g_showtree == True) {
-		for(int i = 0; i < g_treedepth * 4; i++) {
-			logger(" ");
-		}
-		logger("[%d] id[%lx]\n", g_treedepth, wnd);
-	}
-
-	Atom           type;
-	int            format;
-	unsigned long  nitems;
-	unsigned long  bytesafter;
-	unsigned char *rtnprop = NULL;
-
+	/* cur wnd */
 	Bool check = False;
-
 	if (g_isclick == True) {
 		check = True;
 	} else if (g_pid != 0) {
-		if(XGetWindowProperty(g_display, wnd, g_atompid, 0, 1, False, XA_CARDINAL, &type, &format, &nitems, &bytesafter, &rtnprop) == Success) {
-			if(rtnprop != NULL) {
-				if(g_pid == *((pid_t *)rtnprop)) {
-					check = True;
-				}
-				XFree(rtnprop);
-			}
+		pid_t pid = 0;
+		get_wnd_property(wnd, g_atompid, pid, pid_t);
+		if(g_pid == pid) {
+			check = True;
 		}
 	}
 
-	if (check == True) {
+	int vm_state = 0;
+	get_wnd_property(wnd, g_atompid, vm_state, int);
+
+	XWindowAttributes attr;
+	XGetWindowAttributes(g_display, wnd, &attr);
+
+	if (check == True && vm_state != 0 && attr.map_state == IsViewable) {
 		if (g_list_cnt < MAX_LIST_WND) {
-			XWindowAttributes attr;
-			XGetWindowAttributes(g_display, wnd, &attr);
-			if (attr.map_state == IsViewable) {
-				if(XGetWindowProperty(g_display, wnd, g_atomwmstate, 0, 1, False, XA_CARDINAL, &type, &format, &nitems, &bytesafter, &rtnprop) == Success) {
-					if(rtnprop != NULL) {
-						if (*((int*)rtnprop) != 0) {
-							g_list_wnd[g_list_cnt++] = wnd;
-						}
-						XFree(rtnprop);
-					}
-				}
-			}
+			g_list_wnd[g_list_cnt++] = wnd;
 		} else {
 			logger("skip for cnt[%d] >= max[%d]\n", g_list_cnt, MAX_LIST_WND);
 		}
 	}
 
-    Window root_return, parent_return;
-    Window * child_list = NULL;
-    unsigned int child_num = 0;
+	if (g_showtree == True) {
+		for(int i = 0; i < g_treedepth * 4; i++) {
+			logger(" ");
+		}
+		logger("[%d] id[0x%lx] [%d][%d]\n", 
+				g_treedepth, wnd, attr.map_state, vm_state);
+	}
 
-    XQueryTree(g_display, wnd, &root_return, &parent_return, &child_list, &child_num);
+	/* child wnd */
+	Window root_return, parent_return;
+	Window * child_list = NULL;
+	unsigned int child_num = 0;
+
+	XQueryTree(g_display, wnd, &root_return, &parent_return, &child_list, &child_num);
 
 	for(unsigned int i = 0; i < child_num; i++) {
 		g_treedepth++;
@@ -453,6 +471,6 @@ void get_wnds(Window wnd)
 		g_treedepth--;
 	}
 
-    XFree(child_list);
+	XFree(child_list);
 }
 
