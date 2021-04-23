@@ -6,6 +6,11 @@
 #include <signal.h>
 #include <sys/time.h>
 
+#include <X11/Xatom.h>
+#include <X11/Xutil.h>
+#include <X11/cursorfont.h>
+#include <X11/Xproto.h>
+
 #include "xwincopy.h"
 
 #define get_wnd_property(wnd, property, rtnval, rtntype) \
@@ -47,7 +52,9 @@ Bool g_listonly;
 
 Bool g_isclick;
 int g_treedepth;
+
 int g_xerrcode;
+XErrorHandler old_xerror_handler;
 
 Display * g_display;
 Window g_wnd_obj;
@@ -131,16 +138,24 @@ int xerror_handler(Display * display, XErrorEvent *err)
 {
 	g_xerrcode = err->error_code;
 
-    char buf[1024];
-    XGetErrorText(display, err->error_code, buf, sizeof(buf));
-    logger("xerror: [%s]\n", buf);
+	if (err->error_code == BadMatch && err->request_code == X_GetImage) {
+		char buf[1024];
+		XGetErrorText(display, err->error_code, buf, sizeof(buf));
+		logger("ignore xerror:\n");
+		logger("    Error code   : [%d] [%s]\n", err->error_code, buf);
+		logger("    Major opcode : [%d] /usr/include/X11/Xproto.h\n", 
+				err->request_code);
+		logger("    Serial number: [%ld]\n", err->serial);
+	} else {
+		old_xerror_handler(display, err);
+	}
 
-    return 0;
+	return 0;
 }
 
 int operate()
 {
-	XSetErrorHandler(xerror_handler);
+	old_xerror_handler = XSetErrorHandler(xerror_handler);
 
 	g_atompid = XInternAtom(g_display, "_NET_WM_PID", True);
 	g_atomwmstate = XInternAtom(g_display, "_NET_WM_STATE", True);
