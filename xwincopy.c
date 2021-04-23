@@ -66,7 +66,7 @@ int g_width_obj, g_height_obj;
 float g_zoomsize;
 
 Atom g_atompid;
-Atom g_atomwmstate;
+Atom g_atomvmstate;
 
 Bool g_exit = False;
 
@@ -142,10 +142,10 @@ int xerror_handler(Display * display, XErrorEvent *err)
 		char buf[1024];
 		XGetErrorText(display, err->error_code, buf, sizeof(buf));
 		logger("ignore xerror:\n");
-		logger("    Error code   : [%d] [%s]\n", err->error_code, buf);
-		logger("    Major opcode : [%d] /usr/include/X11/Xproto.h\n", 
+		logger("    Error code   : [%u] [%s]\n", err->error_code, buf);
+		logger("    Major opcode : [%u] /usr/include/X11/Xproto.h\n", 
 				err->request_code);
-		logger("    Serial number: [%ld]\n", err->serial);
+		logger("    Serial number: [%lu]\n", err->serial);
 	} else {
 		old_xerror_handler(display, err);
 	}
@@ -158,7 +158,7 @@ int operate()
 	old_xerror_handler = XSetErrorHandler(xerror_handler);
 
 	g_atompid = XInternAtom(g_display, "_NET_WM_PID", True);
-	g_atomwmstate = XInternAtom(g_display, "_NET_WM_STATE", True);
+	g_atomvmstate = XInternAtom(g_display, "_NET_WM_STATE", True);
 
 	g_treedepth = 0;
 	g_list_cnt = 0;
@@ -227,10 +227,10 @@ void copy_sync()
 	g_height_src = g_height_obj = attr_src.height;
 	g_zoomsize = 1;
 
-	int vm_state = 0;
-	get_wnd_property(wnd_src, g_atompid, vm_state, int);
+	unsigned int vm_state = 0;
+	get_wnd_property(wnd_src, g_atomvmstate, vm_state, unsigned int);
 
-	logger("select: id[0x%lx] width[%d] height[%d] map_state[%d] vm_state[%d]\n", wnd_src, attr_src.width, attr_src.height, attr_src.map_state, vm_state);
+	logger("select: id[0x%lx] width[%d] height[%d] map_state[%d] vm_state[%u]\n", wnd_src, attr_src.width, attr_src.height, attr_src.map_state, vm_state);
 
 	g_visual = DefaultVisual(g_display, DefaultScreen(g_display));
 
@@ -449,9 +449,9 @@ void list_wnds()
 		Window wnd = g_list_wnd[i];
 		XWindowAttributes attr;
 		XGetWindowAttributes(g_display, wnd, &attr);
-		int vm_state = 0;
-		get_wnd_property(wnd, g_atompid, vm_state, int);
-		logger("window: id[0x%lx] width[%d] height[%d] map_state[%d] vm_state[%d]\n", wnd, attr.width, attr.height, attr.map_state, vm_state);
+		unsigned int vm_state = 0;
+		get_wnd_property(wnd, g_atomvmstate, vm_state, unsigned int);
+		logger("window: id[0x%lx] width[%d] height[%d] map_state[%d] vm_state[%u]\n", wnd, attr.width, attr.height, attr.map_state, vm_state);
 	}
 }
 
@@ -470,8 +470,8 @@ void get_wnds(Window wnd)
 		}
 	}
 
-	int vm_state = 0;
-	get_wnd_property(wnd, g_atompid, vm_state, int);
+	unsigned int vm_state = 0;
+	get_wnd_property(wnd, g_atomvmstate, vm_state, unsigned int);
 
 	XWindowAttributes attr;
 	XGetWindowAttributes(g_display, wnd, &attr);
@@ -488,7 +488,7 @@ void get_wnds(Window wnd)
 		for(int i = 0; i < g_treedepth * 4; i++) {
 			logger(" ");
 		}
-		logger("[%d] id[0x%lx] [%d][%d]\n", 
+		logger("[%d] id[0x%lx] [%d][%u]\n", 
 				g_treedepth, wnd, attr.map_state, vm_state);
 	}
 
