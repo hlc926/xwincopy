@@ -24,3 +24,5 @@ void zoom_data(const char * data, int datawidth, char * buf, int width, int heig
 /* 递归 */
 void get_wnds(Window wnd);
 
+int xerror_handler(Display * display, XErrorEvent *err);
+

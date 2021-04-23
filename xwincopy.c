@@ -47,6 +47,7 @@ Bool g_listonly;
 
 Bool g_isclick;
 int g_treedepth;
+int g_xerrcode;
 
 Display * g_display;
 Window g_wnd_obj;
@@ -126,8 +127,21 @@ void getparam(int argc, char* argv[])
 	}
 }
 
+int xerror_handler(Display * display, XErrorEvent *err)
+{
+	g_xerrcode = err->error_code;
+
+    char buf[1024];
+    XGetErrorText(display, err->error_code, buf, sizeof(buf));
+    logger("xerror: [%s]\n", buf);
+
+    return 0;
+}
+
 int operate()
 {
+	XSetErrorHandler(xerror_handler);
+
 	g_atompid = XInternAtom(g_display, "_NET_WM_PID", True);
 	g_atomwmstate = XInternAtom(g_display, "_NET_WM_STATE", True);
 
@@ -376,7 +390,12 @@ void zoom_wnd(Window wnd_src, XWindowAttributes attr_src, Window wnd_obj, XWindo
 
 
 	XImage * imagesrc;
+
+	g_xerrcode = Success;
 	imagesrc = XGetImage(g_display, wnd_src, 0, 0, attr_src.width, attr_src.height, AllPlanes, ZPixmap);
+	if (g_xerrcode == BadMatch) {
+		return;
+	}
 
 	int lenpixel = imagesrc->bits_per_pixel / 8;
 	char * buf = malloc(width * height * lenpixel);
@@ -473,4 +492,6 @@ void get_wnds(Window wnd)
 
 	XFree(child_list);
 }
+
+
 
