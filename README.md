@@ -5,7 +5,9 @@ Copy xlib's window and synchronize in real time
 
 ### 功能:
 拷贝xlib的窗口并实时同步。  
-鼠标点击选择要拷贝的窗口。  
+通过 鼠标点击 选择要拷贝的窗口。  
+通过 window id 选择要拷贝的窗口。  
+通过 process pid 选择要拷贝的窗口。  
 可以zoom放大缩小窗口。  
 双击拷贝窗口重置为源窗口大小。  
 拖放移动窗口。  
