@@ -1,4 +1,6 @@
 
+# dnf install libX11-devel.x86_64
+
 cc = gcc
 cflags = -g -O2 -Wall -Wextra
 

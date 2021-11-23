@@ -234,11 +234,11 @@ void copy_sync()
 
 	g_visual = DefaultVisual(g_display, DefaultScreen(g_display));
 
-	XSetWindowAttributes attr_obj;
+	XSetWindowAttributes attr_set;
 	g_wnd_obj = XCreateWindow(g_display, DefaultRootWindow(g_display),
 			0, 0, attr_src.width, attr_src.height, 
 			attr_src.border_width, attr_src.depth, InputOutput,
-			g_visual, CWBackPixel, &attr_obj);
+			g_visual, 0, &attr_set);
 
 	g_gc = XCreateGC(g_display, g_wnd_obj, 0, NULL);
 
