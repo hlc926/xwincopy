@@ -57,6 +57,7 @@ int g_xerrcode;
 XErrorHandler old_xerror_handler;
 
 Display * g_display;
+Window g_wnd_root;
 Window g_wnd_obj;
 static Visual * g_visual;
 static GC g_gc;
@@ -90,6 +91,7 @@ int main(int argc, char* argv[])
 		logger( "failed to open X11 display: %s", XDisplayName(NULL));
 		return -1;
 	}
+	g_wnd_root = DefaultRootWindow(g_display);
 
 	operate();
 
@@ -167,7 +169,7 @@ int operate()
 	if (g_wid != 0) {
 		g_list_wnd[g_list_cnt++] = g_wid;
 	} else if (g_pid != 0) {
-		get_wnds(DefaultRootWindow(g_display));
+		get_wnds(g_wnd_root);
 	} else {
 		logger("\n"
 				"xwincopy: Please select the window about \n"
@@ -195,7 +197,7 @@ void get_click()
 {
 	Cursor cursor = XCreateFontCursor(g_display, XC_watch);
 
-	XGrabPointer(g_display, DefaultRootWindow(g_display), False, ButtonPressMask, GrabModeAsync, GrabModeAsync, None, cursor, CurrentTime);
+	XGrabPointer(g_display, g_wnd_root, False, ButtonPressMask, GrabModeAsync, GrabModeAsync, None, cursor, CurrentTime);
 
 	Window wnd;
 	XEvent event;
@@ -216,6 +218,23 @@ void get_click()
 	get_wnds(wnd);
 }
 
+/* 根据depth class 得到新的配置，以便调整 */
+int get_info_by_depth_class(int depth, int class, XVisualInfo *pvinfo, unsigned long *pvaluemask, XSetWindowAttributes *pattr)
+{
+	if (!XMatchVisualInfo(g_display, DefaultScreen(g_display), depth, class, pvinfo)) {
+		logger("X11 error: Unable to find supported visual info\n");
+		return -1;
+	}
+
+	*pvaluemask = CWColormap | CWBackPixel | CWBorderPixel;
+
+	pattr->colormap = XCreateColormap(g_display, g_wnd_root, pvinfo->visual, AllocNone);
+	pattr->background_pixel = 0;
+	pattr->border_pixel = 0;
+
+	return 0;
+}
+
 void copy_sync()
 {
 	Window wnd_src = g_list_wnd[0];
@@ -230,15 +249,23 @@ void copy_sync()
 	unsigned int vm_state = 0;
 	get_wnd_property(wnd_src, g_atomvmstate, vm_state, unsigned int);
 
-	logger("select: id[0x%lx] width[%d] height[%d] map_state[%d] vm_state[%u]\n", wnd_src, attr_src.width, attr_src.height, attr_src.map_state, vm_state);
+	logger("select: id[0x%lx] w[%d] h[%d] map_state[%d] vm_state[%u] dp[%d]\n", 
+			wnd_src, attr_src.width, attr_src.height, attr_src.map_state, vm_state, attr_src.depth);
 
-	g_visual = DefaultVisual(g_display, DefaultScreen(g_display));
-
+	XVisualInfo vinfo;
+	unsigned long valuemask;
 	XSetWindowAttributes attr_set;
-	g_wnd_obj = XCreateWindow(g_display, DefaultRootWindow(g_display),
+
+	if (get_info_by_depth_class(attr_src.depth, attr_src.visual->class, &vinfo, &valuemask, &attr_set) != 0) {
+		return;
+	}
+
+	g_visual = vinfo.visual;
+
+	g_wnd_obj = XCreateWindow(g_display, g_wnd_root,
 			0, 0, attr_src.width, attr_src.height, 
-			attr_src.border_width, attr_src.depth, InputOutput,
-			g_visual, 0, &attr_set);
+			0, attr_src.depth, InputOutput,
+			g_visual, valuemask, &attr_set);
 
 	g_gc = XCreateGC(g_display, g_wnd_obj, 0, NULL);
 
@@ -451,7 +478,8 @@ void list_wnds()
 		XGetWindowAttributes(g_display, wnd, &attr);
 		unsigned int vm_state = 0;
 		get_wnd_property(wnd, g_atomvmstate, vm_state, unsigned int);
-		logger("window: id[0x%lx] width[%d] height[%d] map_state[%d] vm_state[%u]\n", wnd, attr.width, attr.height, attr.map_state, vm_state);
+		logger("window: id[0x%lx] w[%d] h[%d] map[%d] vm[%u] dp[%d]\n", 
+				wnd, attr.width, attr.height, attr.map_state, vm_state, attr.depth);
 	}
 }
 
@@ -488,8 +516,8 @@ void get_wnds(Window wnd)
 		for(int i = 0; i < g_treedepth * 4; i++) {
 			logger(" ");
 		}
-		logger("[%d] id[0x%lx] [%d][%u]\n", 
-				g_treedepth, wnd, attr.map_state, vm_state);
+		logger("[%d] id[0x%lx] [%d][%u] dp[%d]\n", 
+				g_treedepth, wnd, attr.map_state, vm_state, attr.depth);
 	}
 
 	/* child wnd */
