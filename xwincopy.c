@@ -272,8 +272,7 @@ void copy_sync()
 	XStoreName(g_display, g_wnd_obj, "xwincopy");
 
 	int pid = getpid();
-	Atom atom = XInternAtom(g_display, "_NET_WM_PID", True);
-	XChangeProperty(g_display, g_wnd_obj, atom,
+	XChangeProperty(g_display, g_wnd_obj, g_atompid,
 			XA_CARDINAL, sizeof(pid_t) * 8, 
 			PropModeReplace, (unsigned char *)&pid, 1);
 
@@ -427,6 +426,7 @@ void zoom_wnd(Window wnd_src, XWindowAttributes attr_src, Window wnd_obj, XWindo
 		g_width_obj = width = (int)attr_src.width * zoomsize;
 		g_height_obj = height = (int)attr_src.height * zoomsize;
 	}
+//	logger("debug[%d][%d] [%d][%d] [%d][%d] [%d][%d]\n", attr_src.width, attr_src.height, attr_obj.width, attr_obj.height, g_width_obj, g_height_obj, width, height);
 
 	XResizeWindow(g_display, wnd_obj, width, height); 
 
